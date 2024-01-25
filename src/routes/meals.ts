@@ -12,18 +12,18 @@ export async function mealsRoutes(app: FastifyInstance) {
       const createMealsBodySchema = z.object({
         name: z.string(),
         description: z.string(),
-        isOnTheDiet: z.boolean(),
+        isInTheDiet: z.boolean(),
         date: z.coerce.date(),
       })
 
-      const { name, description, isOnTheDiet, date } =
+      const { name, description, isInTheDiet, date } =
         createMealsBodySchema.parse(request.body)
 
       await knex('meals').insert({
         id: randomUUID(),
         name,
         description,
-        is_on_the_diet: isOnTheDiet,
+        is_in_the_diet: isInTheDiet,
         date: date.getTime(), // unix timestamp
         user_id: request.user?.id,
       })
@@ -81,11 +81,11 @@ export async function mealsRoutes(app: FastifyInstance) {
       const updateMealBodySchema = z.object({
         name: z.string(),
         description: z.string(),
-        isOnTheDiet: z.boolean(),
+        isInTheDiet: z.boolean(),
         date: z.coerce.date(),
       })
 
-      const { name, description, isOnTheDiet, date } =
+      const { name, description, isInTheDiet, date } =
         updateMealBodySchema.parse(request.body)
 
       const meal = await knex('meals').where({ id }).first()
@@ -97,7 +97,7 @@ export async function mealsRoutes(app: FastifyInstance) {
       await knex('meals').where({ id }).update({
         name,
         description,
-        is_on_the_diet: isOnTheDiet,
+        is_in_the_diet: isInTheDiet,
         date: date.getTime(), // unix timestamp
       })
 
@@ -122,6 +122,51 @@ export async function mealsRoutes(app: FastifyInstance) {
       await knex('meals').where({ id }).delete()
 
       return reply.status(204).send()
+    },
+  )
+
+  app.get(
+    '/summary',
+    { preHandler: [checkSessionIdExists] },
+    async (request, reply) => {
+      const dietMeals = await knex('meals')
+        .where({ user_id: request.user?.id, is_in_the_diet: true })
+        .count('id', { as: 'total' })
+        .first()
+
+      const offDietMeals = await knex('meals')
+        .where({ user_id: request.user?.id, is_in_the_diet: false })
+        .count('id', { as: 'total' })
+        .first()
+
+      const totalOfMeals = await knex('meals')
+        .where({ user_id: request.user?.id })
+        .orderBy('date', 'desc')
+
+      const { bestDietMealsSequence } = totalOfMeals.reduce(
+        (acc, meal) => {
+          if (meal.is_in_the_diet) {
+            acc.currentSequence += 1
+          } else {
+            acc.currentSequence = 0
+          }
+
+          acc.bestDietMealsSequence = Math.max(
+            acc.bestDietMealsSequence,
+            acc.currentSequence,
+          )
+
+          return acc
+        },
+        { bestDietMealsSequence: 0, currentSequence: 0 },
+      )
+
+      return reply.send({
+        totalOfMeals: totalOfMeals.length,
+        dietMeals: dietMeals?.total,
+        offDietMeals: offDietMeals?.total,
+        bestDietMealsSequence,
+      })
     },
   )
 }
